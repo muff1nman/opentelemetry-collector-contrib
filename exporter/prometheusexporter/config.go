@@ -44,6 +44,9 @@ type Config struct {
 	// WithoutScopeInfo controls the addition of labels for the instrumentation scope
 	WithoutScopeInfo bool `mapstructure:"without_scope_info"`
 
+	// WithoutTargetInfo controls the addition of labels for the OpenTelemetry Resource
+	WithoutTargetInfo bool `mapstructure:"without_target_info"`
+
 	// AddMetricSuffixes controls whether suffixes are added to metric names. Defaults to true.
 	// Deprecated: Use TranslationStrategy instead. This setting is ignored when TranslationStrategy is explicitly set.
 	AddMetricSuffixes bool `mapstructure:"add_metric_suffixes"`

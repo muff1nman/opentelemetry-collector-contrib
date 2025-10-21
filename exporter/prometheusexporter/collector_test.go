@@ -401,6 +401,59 @@ func TestCollectMetricsWithoutOtelScope(t *testing.T) {
 	require.Empty(t, loggerCore.errorMessages, "collector unexpectedly returned an error")
 }
 
+func TestCollectMetricsWithoutTargetInfo(t *testing.T) {
+	metric := pmetric.NewMetric()
+	metric.SetName("test_metric")
+	metric.SetDescription("test description")
+	dp := metric.SetEmptyGauge().DataPoints().AppendEmpty()
+	dp.SetIntValue(42)
+	dp.Attributes().PutStr("label", "1")
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+
+	loggerCore := errorCheckCore{}
+
+	c := newCollector(&Config{
+		Namespace:         "test_space",
+		SendTimestamps:    false,
+		WithoutTargetInfo: true,
+	}, zap.New(&loggerCore))
+
+	rAttrs := pcommon.NewMap()
+	rAttrs.PutStr(string(conventions.ServiceInstanceIDKey), "localhost:9090")
+	rAttrs.PutStr(string(conventions.ServiceNameKey), "testapp")
+	rAttrs.PutStr(string(conventions.ServiceNamespaceKey), "prod")
+
+	// Replace accumulator with mock for test control
+	c.accumulator = &mockAccumulator{
+		[]pmetric.Metric{metric},
+		rAttrs,
+		[]string{""},
+		[]string{""},
+		[]string{""},
+		[]pcommon.Map{pcommon.NewMap()},
+	}
+
+	ch := make(chan prometheus.Metric, 1)
+	go func() {
+		c.Collect(ch)
+		close(ch)
+	}()
+
+	for m := range ch {
+		pbMetric := io_prometheus_client.Metric{}
+		require.NoError(t, m.Write(&pbMetric))
+		labels := make([]string, 0, len(pbMetric.Label))
+		for _, label := range pbMetric.Label {
+			labels = append(labels, *label.Name)
+		}
+		require.Contains(t, m.Desc().String(), "test_space_test_metric")
+		require.NotContains(t, labels, "instance")
+		require.NotContains(t, labels, "job")
+	}
+
+	require.Empty(t, loggerCore.errorMessages, "collector unexpectedly returned an error")
+}
+
 func TestCollectMetrics(t *testing.T) {
 	tests := []struct {
 		name       string

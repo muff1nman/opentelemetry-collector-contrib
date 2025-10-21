@@ -32,12 +32,13 @@ type collector struct {
 	accumulator accumulator
 	logger      *zap.Logger
 
-	sendTimestamps   bool
-	namespace        string
-	constLabels      prometheus.Labels
-	metricFamilies   sync.Map
-	metricExpiration time.Duration
-	withoutScopeInfo bool
+	sendTimestamps    bool
+	namespace         string
+	constLabels       prometheus.Labels
+	metricFamilies    sync.Map
+	metricExpiration  time.Duration
+	withoutScopeInfo  bool
+	withoutTargetInfo bool
 
 	metricNamer otlptranslator.MetricNamer
 	labelNamer  otlptranslator.LabelNamer
@@ -52,15 +53,16 @@ func newCollector(config *Config, logger *zap.Logger) *collector {
 	labelNamer := configureLabelNamer(config)
 
 	return &collector{
-		accumulator:      newAccumulator(logger, config.MetricExpiration),
-		logger:           logger,
-		namespace:        normalizeNamespace(config.Namespace, labelNamer, logger),
-		sendTimestamps:   config.SendTimestamps,
-		constLabels:      config.ConstLabels,
-		metricExpiration: config.MetricExpiration,
-		withoutScopeInfo: config.WithoutScopeInfo,
-		metricNamer:      configureMetricNamer(config),
-		labelNamer:       labelNamer,
+		accumulator:       newAccumulator(logger, config.MetricExpiration),
+		logger:            logger,
+		namespace:         normalizeNamespace(config.Namespace, labelNamer, logger),
+		sendTimestamps:    config.SendTimestamps,
+		constLabels:       config.ConstLabels,
+		metricExpiration:  config.MetricExpiration,
+		withoutScopeInfo:  config.WithoutScopeInfo,
+		withoutTargetInfo: config.WithoutTargetInfo,
+		metricNamer:       configureMetricNamer(config),
+		labelNamer:        labelNamer,
 	}
 }
 
@@ -233,11 +235,11 @@ func (c *collector) getMetricMetadata(metric pmetric.Metric, mType *dto.MetricTy
 		values = append(values, scopeSchemaURL)
 	}
 
-	if job, ok := extractJob(resourceAttrs); ok {
+	if job, ok := extractJob(resourceAttrs); ok && !c.withoutTargetInfo {
 		keys = append(keys, model.JobLabel)
 		values = append(values, job)
 	}
-	if instance, ok := extractInstance(resourceAttrs); ok {
+	if instance, ok := extractInstance(resourceAttrs); ok && !c.withoutTargetInfo {
 		keys = append(keys, model.InstanceLabel)
 		values = append(values, instance)
 	}
@@ -515,13 +517,15 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 
 	inMetrics, resourceAttrs, scopeNames, scopeVersions, scopeSchemaURLs, scopeAttributes := c.accumulator.Collect()
 
-	targetMetrics, err := c.createTargetInfoMetrics(resourceAttrs)
-	if err != nil {
-		c.logger.Error(fmt.Sprintf("failed to convert metric %s: %s", otlptranslator.TargetInfoMetricName, err.Error()))
-	}
-	for _, m := range targetMetrics {
-		ch <- m
-		c.logger.Debug(fmt.Sprintf("metric served: %s", m.Desc().String()))
+	if !c.withoutTargetInfo {
+		targetMetrics, err := c.createTargetInfoMetrics(resourceAttrs)
+		if err != nil {
+			c.logger.Error(fmt.Sprintf("failed to convert metric %s: %s", otlptranslator.TargetInfoMetricName, err.Error()))
+		}
+		for _, m := range targetMetrics {
+			ch <- m
+			c.logger.Debug(fmt.Sprintf("metric served: %s", m.Desc().String()))
+		}
 	}
 
 	for i := range inMetrics {
